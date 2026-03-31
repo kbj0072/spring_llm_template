@@ -18,7 +18,8 @@ public class ChatRequest {
 
     public static class Message {
         private String role;
-        private String content;
+        // String(텍스트 전용) 또는 List<Map>(OpenAI vision 배열 포맷) 모두 허용
+        private Object content;
 
         public Message() {}
 
@@ -35,11 +36,11 @@ public class ChatRequest {
             this.role = role;
         }
 
-        public String getContent() {
+        public Object getContent() {
             return content;
         }
 
-        public void setContent(String content) {
+        public void setContent(Object content) {
             this.content = content;
         }
     }

@@ -14,11 +14,18 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Controller
@@ -93,6 +100,40 @@ public class ChatController {
     public String logout(HttpSession session) {
         session.invalidate();
         return "redirect:/login";
+    }
+
+    @PostMapping("/api/extract-pdf")
+    @ResponseBody
+    public ResponseEntity<Map<String, String>> extractPdf(
+            @RequestBody Map<String, String> body,
+            HttpSession session) {
+        if (!isAuthenticated(session)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        String dataUrl = body.get("dataUrl");
+        if (dataUrl == null || !dataUrl.startsWith("data:application/pdf;base64,")) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "유효한 PDF data URL이 아닙니다."));
+        }
+
+        try {
+            String b64 = dataUrl.substring("data:application/pdf;base64,".length());
+            byte[] pdfBytes = Base64.getDecoder().decode(b64);
+            try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+                String text = new PDFTextStripper().getText(doc).strip();
+                if (text.isEmpty()) {
+                    text = "(PDF에서 텍스트를 추출할 수 없었습니다. 스캔본 PDF일 수 있습니다.)";
+                }
+                return ResponseEntity.ok(Map.of("text", text));
+            }
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "base64 디코딩에 실패했습니다."));
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "PDF 파싱 중 오류가 발생했습니다: " + e.getMessage()));
+        }
     }
 
     @PostMapping("/api/chat")

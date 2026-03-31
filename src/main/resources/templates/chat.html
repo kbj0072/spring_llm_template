@@ -229,6 +229,109 @@
         background: #c5cae9;
         cursor: not-allowed;
       }
+
+      /* ── 첨부 버튼 ── */
+      #attach-btn {
+        background: transparent;
+        color: #9aa0a6;
+        border: none;
+        border-radius: 50%;
+        width: 44px;
+        height: 44px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        transition: color 0.2s;
+        padding: 0;
+      }
+
+      #attach-btn:hover {
+        color: #1a73e8;
+      }
+
+      #attach-btn.has-file {
+        color: #1a73e8;
+      }
+
+      /* ── 첨부 미리보기 띠 ── */
+      .attachment-preview {
+        padding: 8px 16px;
+        gap: 8px;
+        align-items: center;
+        overflow-x: auto;
+        background: #f8f9fa;
+        border-top: 1px solid #e0e0e0;
+        flex-shrink: 0;
+      }
+
+      .attachment-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #fff;
+        border: 1px solid #dadce0;
+        border-radius: 10px;
+        padding: 5px 8px 5px 6px;
+        max-width: 220px;
+      }
+
+      .attachment-thumb {
+        width: 36px;
+        height: 36px;
+        object-fit: cover;
+        border-radius: 6px;
+        flex-shrink: 0;
+      }
+
+      .attachment-file-icon {
+        font-size: 22px;
+        flex-shrink: 0;
+      }
+
+      .attachment-name {
+        font-size: 12px;
+        color: #3c4043;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+
+      .attachment-remove {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 16px;
+        color: #9aa0a6;
+        padding: 0;
+        line-height: 1;
+        flex-shrink: 0;
+      }
+
+      .attachment-remove:hover {
+        color: #d93025;
+      }
+
+      /* ── 메시지 내 이미지 ── */
+      .message-bubble .msg-image {
+        max-width: 100%;
+        max-height: 280px;
+        border-radius: 10px;
+        display: block;
+        margin-top: 6px;
+      }
+
+      .message-bubble .msg-text {
+        margin: 0;
+      }
+
+      /* ── 드래그 오버 ── */
+      .chat-container.drag-over {
+        outline: 3px dashed #1a73e8;
+        outline-offset: -4px;
+      }
     </style>
   </head>
   <body>
@@ -244,7 +347,29 @@
         <!-- 메시지가 여기에 추가됩니다 -->
       </div>
 
+      <div id="attachment-preview" class="attachment-preview" style="display:none"></div>
+
       <div class="chat-footer">
+        <input
+          type="file"
+          id="file-input"
+          accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.log,.py,.js,.ts,.java,.html,.css"
+          style="display:none"
+        />
+        <button id="attach-btn" type="button" title="파일 첨부">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
         <textarea
           id="user-input"
           rows="1"
@@ -273,15 +398,191 @@
       const messagesEl = document.getElementById("chat-messages");
       const inputEl = document.getElementById("user-input");
       const sendBtn = document.getElementById("send-btn");
+      const attachBtn = document.getElementById("attach-btn");
+      const fileInput = document.getElementById("file-input");
+      const attachmentPreview = document.getElementById("attachment-preview");
 
-      // 클라이언트 측 대화 히스토리
       const history = [];
+      let pendingAttachment = null;
+      const FILE_SIZE_LIMIT = 5 * 1024 * 1024; // 5 MB
+
+      // ── 첨부 파일 처리 ────────────────────────────────────────
+
+      attachBtn.addEventListener("click", () => fileInput.click());
+
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files[0];
+        if (file) handleFileSelect(file);
+      });
+
+      // 클립보드 붙여넣기 (이미지)
+      inputEl.addEventListener("paste", (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+          if (item.type.startsWith("image/")) {
+            e.preventDefault();
+            handleFileSelect(item.getAsFile());
+            break;
+          }
+        }
+      });
+
+      // 드래그 앤 드롭
+      const chatContainer = document.querySelector(".chat-container");
+      chatContainer.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        chatContainer.classList.add("drag-over");
+      });
+      chatContainer.addEventListener("dragleave", () => {
+        chatContainer.classList.remove("drag-over");
+      });
+      chatContainer.addEventListener("drop", (e) => {
+        e.preventDefault();
+        chatContainer.classList.remove("drag-over");
+        const file = e.dataTransfer.files[0];
+        if (file) handleFileSelect(file);
+      });
+
+      function handleFileSelect(file) {
+        if (file.size > FILE_SIZE_LIMIT) {
+          alert("파일 크기는 5MB 이하여야 합니다.");
+          fileInput.value = "";
+          return;
+        }
+        const isImage = file.type.startsWith("image/");
+        const reader = new FileReader();
+        if (isImage) {
+          reader.onload = (e) => {
+            pendingAttachment = {
+              name: file.name,
+              type: file.type,
+              dataUrl: e.target.result,
+              isImage: true,
+              isPdf: false,
+            };
+            showAttachmentPreview();
+          };
+          reader.readAsDataURL(file);
+        } else if (file.type === "application/pdf") {
+          reader.onload = async (e) => {
+            const dataUrl = e.target.result;
+            // 미리보기 먼저 표시 (추출 중 상태)
+            pendingAttachment = {
+              name: file.name,
+              type: file.type,
+              fileText: null,
+              isImage: false,
+              isPdf: true,
+              extracting: true,
+            };
+            showAttachmentPreview();
+
+            try {
+              const res = await fetch("/api/extract-pdf", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dataUrl }),
+              });
+              if (res.status === 401) { window.location.href = "/login"; return; }
+              const data = await res.json();
+              if (data.error) {
+                alert("PDF 텍스트 추출 실패: " + data.error);
+                pendingAttachment = null;
+                fileInput.value = "";
+              } else {
+                pendingAttachment.fileText = data.text;
+                pendingAttachment.extracting = false;
+              }
+            } catch (err) {
+              alert("PDF 처리 중 오류: " + err.message);
+              pendingAttachment = null;
+              fileInput.value = "";
+            }
+            showAttachmentPreview();
+          };
+          reader.readAsDataURL(file);
+        } else {
+          reader.onload = (e) => {
+            pendingAttachment = {
+              name: file.name,
+              type: file.type,
+              fileText: e.target.result,
+              isImage: false,
+              isPdf: false,
+            };
+            showAttachmentPreview();
+          };
+          reader.readAsText(file, "utf-8");
+        }
+      }
+
+      function showAttachmentPreview() {
+        attachmentPreview.innerHTML = "";
+        if (!pendingAttachment) {
+          attachmentPreview.style.display = "none";
+          attachBtn.classList.remove("has-file");
+          return;
+        }
+        attachmentPreview.style.display = "flex";
+        attachBtn.classList.add("has-file");
+
+        const item = document.createElement("div");
+        item.className = "attachment-item";
+
+        if (pendingAttachment.isImage) {
+          const img = document.createElement("img");
+          img.src = pendingAttachment.dataUrl;
+          img.className = "attachment-thumb";
+          item.appendChild(img);
+        } else {
+          const icon = document.createElement("span");
+          icon.className = "attachment-file-icon";
+          icon.textContent = pendingAttachment.isPdf ? "📕" : "📄";
+          item.appendChild(icon);
+        }
+
+        if (pendingAttachment.extracting) {
+          const spin = document.createElement("span");
+          spin.className = "attachment-name";
+          spin.textContent = "텍스트 추출 중…";
+          spin.style.color = "#9aa0a6";
+          item.appendChild(spin);
+          attachmentPreview.appendChild(item);
+          return;
+        }
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "attachment-name";
+        nameEl.textContent = pendingAttachment.name;
+        item.appendChild(nameEl);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "attachment-remove";
+        removeBtn.type = "button";
+        removeBtn.textContent = "×";
+        removeBtn.addEventListener("click", () => {
+          pendingAttachment = null;
+          fileInput.value = "";
+          showAttachmentPreview();
+        });
+        item.appendChild(removeBtn);
+
+        attachmentPreview.appendChild(item);
+      }
+
+      // ── 메시지 UI ─────────────────────────────────────────────
+
+      function escapeHtml(str) {
+        return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
 
       function scrollToBottom() {
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
 
-      function appendMessage(role, text) {
+      // content: string 또는 OpenAI content 배열( [{type,text}, {type,image_url}] )
+      function appendMessage(role, content) {
         const row = document.createElement("div");
         row.className = `message-row ${role}`;
 
@@ -291,7 +592,32 @@
 
         const bubble = document.createElement("div");
         bubble.className = "message-bubble";
-        bubble.textContent = text;
+
+        if (Array.isArray(content)) {
+          content.forEach((part) => {
+            if (part.type === "text" && part.text) {
+              const p = document.createElement("p");
+              p.className = "msg-text";
+              p.textContent = part.text;
+              bubble.appendChild(p);
+            } else if (part.type === "image_url" && part.image_url) {
+              const img = document.createElement("img");
+              img.src = part.image_url.url;
+              img.className = "msg-image";
+              img.alt = "첨부 이미지";
+              bubble.appendChild(img);
+            } else if (part.type === "file_badge" && part.name) {
+              const badge = document.createElement("div");
+              badge.style.cssText =
+                "display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.18);" +
+                "border-radius:8px;padding:4px 10px;font-size:13px;margin-top:4px;";
+              badge.innerHTML = `<span>📎</span><span>${escapeHtml(part.name)}</span>`;
+              bubble.appendChild(badge);
+            }
+          });
+        } else {
+          bubble.textContent = content;
+        }
 
         row.appendChild(avatar);
         row.appendChild(bubble);
@@ -323,15 +649,64 @@
         if (row) row.remove();
       }
 
+      // ── 메시지 전송 ───────────────────────────────────────────
+
       async function sendMessage() {
         const text = inputEl.value.trim();
-        if (!text) return;
+        if (!text && !pendingAttachment) return;
+        if (pendingAttachment && pendingAttachment.extracting) {
+          alert("PDF 텍스트를 추출 중입니다. 잠시 후 다시 시도하세요.");
+          return;
+        }
 
-        // 사용자 메시지 UI 추가 및 히스토리 기록
-        appendMessage("user", text);
-        history.push({ role: "user", content: text });
+        // LLM 전송용 content (파일 전체 내용 포함)
+        let apiContent;
+        // UI 표시용 content (파일은 이름 배지만 표시)
+        let displayContent;
+
+        if (pendingAttachment) {
+          const apiParts = [];
+          const displayParts = [];
+          if (text) {
+            apiParts.push({ type: "text", text });
+            displayParts.push({ type: "text", text });
+          }
+
+          if (pendingAttachment.isImage) {
+            apiParts.push({
+              type: "image_url",
+              image_url: { url: pendingAttachment.dataUrl },
+            });
+            // 이미지는 UI에도 미리보기 표시
+            displayParts.push({
+              type: "image_url",
+              image_url: { url: pendingAttachment.dataUrl },
+            });
+          } else {
+            // 텍스트/PDF: LLM에는 내용 전달, UI에는 파일명 배지만 표시
+            const fileBlock = `[파일: ${pendingAttachment.name}]\n${pendingAttachment.fileText}`;
+            if (apiParts.length > 0) {
+              apiParts[0].text = text + "\n\n" + fileBlock;
+            } else {
+              apiParts.push({ type: "text", text: fileBlock });
+            }
+            displayParts.push({ type: "file_badge", name: pendingAttachment.name });
+          }
+          apiContent = apiParts;
+          displayContent = displayParts;
+        } else {
+          apiContent = text;
+          displayContent = text;
+        }
+
+        appendMessage("user", displayContent);
+        history.push({ role: "user", content: apiContent });
+
         inputEl.value = "";
         inputEl.style.height = "auto";
+        pendingAttachment = null;
+        fileInput.value = "";
+        showAttachmentPreview();
 
         sendBtn.disabled = true;
         showTyping();
@@ -355,7 +730,6 @@
           const data = await res.json();
           const reply = data.content || "응답을 받지 못했습니다.";
 
-          // AI 응답 히스토리 기록 및 UI 추가
           history.push({ role: "assistant", content: reply });
           hideTyping();
           appendMessage("assistant", reply);
