@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LLM Chat</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style>
       * {
         box-sizing: border-box;
@@ -90,8 +96,12 @@
         border-radius: 18px;
         font-size: 15px;
         line-height: 1.5;
-        white-space: pre-wrap;
         word-break: break-word;
+      }
+
+      /* 사용자 메시지는 입력 그대로 개행 유지 */
+      .message-row.user .message-bubble {
+        white-space: pre-wrap;
       }
 
       .message-row.user .message-bubble {
@@ -228,6 +238,105 @@
       #send-btn:disabled {
         background: #c5cae9;
         cursor: not-allowed;
+      }
+
+      /* ── 마크다운 렌더링 ── */
+      .md-body {
+        font-size: 15px;
+        line-height: 1.65;
+        color: #202124;
+        white-space: normal; /* pre-wrap 상속 차단 */
+      }
+      .md-body p {
+        margin: 0 0 8px;
+      }
+      .md-body p:last-child {
+        margin-bottom: 0;
+      }
+      .md-body h1,
+      .md-body h2,
+      .md-body h3,
+      .md-body h4,
+      .md-body h5,
+      .md-body h6 {
+        margin: 14px 0 6px;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .md-body h1 {
+        font-size: 1.35em;
+      }
+      .md-body h2 {
+        font-size: 1.2em;
+      }
+      .md-body h3 {
+        font-size: 1.08em;
+      }
+      .md-body ul,
+      .md-body ol {
+        margin: 4px 0 8px 20px;
+        padding: 0;
+      }
+      .md-body li {
+        margin-bottom: 2px;
+      }
+      .md-body code {
+        background: #f1f3f4;
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.88em;
+      }
+      .md-body pre {
+        background: #f1f3f4;
+        border-radius: 8px;
+        padding: 12px 14px;
+        overflow-x: auto;
+        margin: 8px 0;
+      }
+      .md-body pre code {
+        background: none;
+        padding: 0;
+        font-size: 0.85em;
+      }
+      .md-body blockquote {
+        border-left: 3px solid #dadce0;
+        margin: 8px 0;
+        padding: 4px 12px;
+        color: #5f6368;
+      }
+      .md-body hr {
+        border: none;
+        border-top: 1px solid #dadce0;
+        margin: 12px 0;
+      }
+      .md-body table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 8px 0;
+        font-size: 0.93em;
+      }
+      .md-body th,
+      .md-body td {
+        border: 1px solid #dadce0;
+        padding: 6px 10px;
+        text-align: left;
+      }
+      .md-body th {
+        background: #f1f3f4;
+        font-weight: 600;
+      }
+      .md-body a {
+        color: #1a73e8;
+        text-decoration: underline;
+      }
+      /* assistant 버블 위에서 code 배경 조정 */
+      .message-row.assistant .md-body code {
+        background: #e8eaed;
+      }
+      .message-row.assistant .md-body pre {
+        background: #e8eaed;
       }
 
       /* ── 첨부 버튼 ── */
@@ -593,7 +702,40 @@
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
 
-      // content: string 또는 OpenAI content 배열( [{type,text}, {type,image_url}] )
+      // marked 초기화 (XSS 방지: sanitize는 DOMPurify 없이 최소한으로)
+      marked.setOptions({
+        breaks: false, // true이면 단일 \n마다 <br> 생성 → <p> 마진과 중첩돼 이중 공백 발생
+        gfm: true,
+      });
+      marked.use({
+        renderer: {
+          // 외부 링크는 새 탭으로
+          link({ href, text }) {
+            const safeText = text ?? "";
+            const safe =
+              href &&
+              (href.startsWith("http") ||
+                href.startsWith("https") ||
+                href.startsWith("/"));
+            if (!safe) return escapeHtml(safeText);
+            return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
+          },
+        },
+      });
+
+      function renderMarkdown(text) {
+        const html = marked.parse(text);
+        const div = document.createElement("div");
+        div.className = "md-body";
+        div.innerHTML = html;
+        // 코드 블록 syntax highlight
+        div
+          .querySelectorAll("pre code")
+          .forEach((block) => hljs.highlightElement(block));
+        return div;
+      }
+
+      // content: string 또는 display content 배열( [{type,text|image_url|file_badge}] )
       function appendMessage(role, content) {
         const row = document.createElement("div");
         row.className = `message-row ${role}`;
@@ -608,10 +750,14 @@
         if (Array.isArray(content)) {
           content.forEach((part) => {
             if (part.type === "text" && part.text) {
-              const p = document.createElement("p");
-              p.className = "msg-text";
-              p.textContent = part.text;
-              bubble.appendChild(p);
+              if (role === "assistant") {
+                bubble.appendChild(renderMarkdown(part.text));
+              } else {
+                const p = document.createElement("p");
+                p.className = "msg-text";
+                p.textContent = part.text;
+                bubble.appendChild(p);
+              }
             } else if (part.type === "image_url" && part.image_url) {
               const img = document.createElement("img");
               img.src = part.image_url.url;
@@ -628,7 +774,12 @@
             }
           });
         } else {
-          bubble.textContent = content;
+          // 단순 문자열: assistant면 마크다운 렌더링
+          if (role === "assistant") {
+            bubble.appendChild(renderMarkdown(String(content)));
+          } else {
+            bubble.textContent = content;
+          }
         }
 
         row.appendChild(avatar);
